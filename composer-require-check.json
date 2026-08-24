@@ -21,6 +21,8 @@
         "IS_WINDOWS",
         "posix_kill",
         "pcntl_waitpid",
+        "pcntl_get_last_error",
+        "PCNTL_EINTR",
         "WNOHANG"
     ],
     "php-core-extensions": [

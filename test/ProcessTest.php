@@ -5,6 +5,7 @@ namespace Amp\Process\Test;
 use Amp\CancelledException;
 use Amp\Future;
 use Amp\PHPUnit\AsyncTestCase;
+use Amp\Process\Internal\ProcessHandle;
 use Amp\Process\Process;
 use Amp\TimeoutCancellation;
 use const Amp\Process\IS_WINDOWS;
@@ -141,6 +142,84 @@ class ProcessTest extends AsyncTestCase
         $process->kill();
 
         self::assertSame(IS_WINDOWS ? 1 : 137, $process->join());
+    }
+
+    /**
+     * @requires extension pcntl
+     * @runInSeparateProcess
+     * @preserveGlobalState disabled
+     */
+    public function testProcessDestructionReapsShell(): void
+    {
+        $process = Process::start(self::CMD_PROCESS_SLOW);
+        unset($process);
+
+        $status = 0;
+        self::assertSame(-1, \pcntl_waitpid(-1, $status, \WNOHANG));
+        self::assertSame(\PCNTL_ECHILD, \pcntl_get_last_error());
+    }
+
+    /**
+     * @requires extension pcntl
+     * @runInSeparateProcess
+     * @preserveGlobalState disabled
+     */
+    public function testCompletedProcessDestructionReapsShell(): void
+    {
+        $process = Process::start('exit 0');
+        self::assertSame(0, $process->join());
+        unset($process);
+
+        $status = 0;
+        self::assertSame(-1, \pcntl_waitpid(-1, $status, \WNOHANG));
+        self::assertSame(\PCNTL_ECHILD, \pcntl_get_last_error());
+    }
+
+    /**
+     * @requires extension pcntl
+     * @runInSeparateProcess
+     * @preserveGlobalState disabled
+     */
+    public function testShutdownReapsShellAfterProcessDestruction(): void
+    {
+        $process = Process::start(self::CMD_PROCESS_SLOW);
+        $handle = (new \ReflectionProperty($process, 'handle'))->getValue($process);
+        self::assertInstanceOf(ProcessHandle::class, $handle);
+
+        $handle->wait();
+        unset($process, $handle);
+
+        $status = 0;
+        self::assertSame(-1, \pcntl_waitpid(-1, $status, \WNOHANG));
+        self::assertSame(\PCNTL_ECHILD, \pcntl_get_last_error());
+    }
+
+    /**
+     * @requires extension pcntl
+     */
+    public function testShutdownDoesNotWaitForRunningProcess(): void
+    {
+        $code = \sprintf(
+            'require %s; $GLOBALS["process"] = Amp\\Process\\Process::start("sleep 30");',
+            \var_export(\dirname(__DIR__) . '/vendor/autoload.php', true),
+        );
+        $process = Process::start([\PHP_BINARY, '-r', $code]);
+
+        self::assertSame(0, $process->join(new TimeoutCancellation(2)));
+    }
+
+    /**
+     * @requires extension pcntl
+     */
+    public function testProcessCreatedByLateShutdownHandlerDoesNotBlockShutdown(): void
+    {
+        $code = \sprintf(
+            'require %s; Amp\\Process\\Process::start("exit 0")->join(); register_shutdown_function(static function (): void { $GLOBALS["process"] = Amp\\Process\\Process::start("sleep 30"); });',
+            \var_export(\dirname(__DIR__) . '/vendor/autoload.php', true),
+        );
+        $process = Process::start([\PHP_BINARY, '-r', $code]);
+
+        self::assertSame(0, $process->join(new TimeoutCancellation(2)));
     }
 
     public function testKillThenReadStdout(): void
