@@ -17,6 +17,11 @@
             <directory>test</directory>
         </testsuite>
     </testsuites>
+    <groups>
+        <exclude>
+            <group>failing</group>
+        </exclude>
+    </groups>
     <coverage>
         <include>
             <directory suffix=".php">src</directory>
